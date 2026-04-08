@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Face Particle Interaction</title>
+  <title>Face Particle Working</title>
   <style>
     body { margin: 0; overflow: hidden; background: black; }
 
@@ -11,7 +11,7 @@
       height: 100vh;
       object-fit: cover;
       transform: scaleX(-1);
-      opacity: 0.4; /* make face visible */
+      opacity: 1; /* FULL visible */
     }
 
     canvas {
@@ -27,9 +27,8 @@
 <video id="video" autoplay playsinline></video>
 <canvas id="canvas"></canvas>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
 
 <script>
 const video = document.getElementById('video');
@@ -39,136 +38,43 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-let particles = [];
-let handPos = null;
-
-// Convert face point
-function getPoint(p) {
-  return {
-    x: p.x * canvas.width,
-    y: p.y * canvas.height
-  };
-}
-
-// Create particles ONCE
-function updateBasePositions(face) {
-  if (particles.length === 0) {
-    particles = face.map(p => {
-      const pt = getPoint(p);
-      return {
-        x: pt.x,
-        y: pt.y,
-        baseX: pt.x,
-        baseY: pt.y,
-        vx: 0,
-        vy: 0
-      };
-    });
-  } else {
-    face.forEach((p, i) => {
-      const pt = getPoint(p);
-      particles[i].baseX = pt.x;
-      particles[i].baseY = pt.y;
-    });
-  }
-}
-
-// Physics
-function updateParticles() {
-  particles.forEach(p => {
-
-    // spring back to face
-    let dx = p.baseX - p.x;
-    let dy = p.baseY - p.y;
-
-    p.vx += dx * 0.02;
-    p.vy += dy * 0.02;
-
-    // hand repulsion
-    if (handPos) {
-      let hx = p.x - handPos.x;
-      let hy = p.y - handPos.y;
-      let dist = Math.sqrt(hx*hx + hy*hy);
-
-      if (dist < 150) {
-        let force = (150 - dist) / 150;
-        p.vx += (hx / dist) * force * 3;
-        p.vy += (hy / dist) * force * 3;
-      }
-    }
-
-    // damping
-    p.vx *= 0.9;
-    p.vy *= 0.9;
-
-    p.x += p.vx;
-    p.y += p.vy;
-  });
-}
-
-// Draw
-function drawParticles() {
-  particles.forEach(p => {
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.5, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255,255,0,0.9)";
-    ctx.fill();
-  });
-}
-
-// Face
+// Face mesh
 const faceMesh = new FaceMesh({
-  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  locateFile: (file) => {
+    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+  }
 });
 
 faceMesh.setOptions({
   maxNumFaces: 1,
   refineLandmarks: true,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
 });
 
+// Draw points
 faceMesh.onResults(results => {
-  if (results.multiFaceLandmarks) {
-    updateBasePositions(results.multiFaceLandmarks[0]);
-  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (!results.multiFaceLandmarks) return;
+
+  const face = results.multiFaceLandmarks[0];
+
+  face.forEach(p => {
+    const x = p.x * canvas.width;
+    const y = p.y * canvas.height;
+
+    ctx.beginPath();
+    ctx.arc(x, y, 1.5, 0, Math.PI*2);
+    ctx.fillStyle = "yellow";
+    ctx.fill();
+  });
 });
 
-// Hand
-const hands = new Hands({
-  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-});
-
-hands.setOptions({
-  maxNumHands: 1,
-  minDetectionConfidence: 0.6,
-  minTrackingConfidence: 0.6
-});
-
-hands.onResults(results => {
-  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const p = results.multiHandLandmarks[0][8];
-    handPos = {
-      x: (1 - p.x) * canvas.width,
-      y: p.y * canvas.height
-    };
-  } else {
-    handPos = null;
-  }
-});
-
-// Main loop
+// Camera
 const camera = new Camera(video, {
   onFrame: async () => {
     await faceMesh.send({image: video});
-    await hands.send({image: video});
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (particles.length > 0) {
-      updateParticles();
-      drawParticles();
-    }
   },
   width: 1280,
   height: 720

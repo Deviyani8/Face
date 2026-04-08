@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Particle Face Interaction</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+    video {
+      position: absolute;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: 0.1;
+    }
+    canvas { position: absolute; top: 0; left: 0; }
+  </style>
+</head>
+
+<body>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let particles = [];
+let handPos = null;
+
+// Convert points
+function getFacePoint(p) {
+  return {
+    x: p.x * canvas.width,
+    y: p.y * canvas.height
+  };
+}
+
+// Create particles
+function createParticles(face) {
+  if (particles.length === 0) {
+    particles = face.map(p => {
+      const pt = getFacePoint(p);
+      return {
+        x: pt.x,
+        y: pt.y,
+        baseX: pt.x,
+        baseY: pt.y,
+        vx: 0,
+        vy: 0
+      };
+    });
+  }
+}
+
+// Update particles
+function updateParticles() {
+  particles.forEach(p => {
+
+    // return to face (spring)
+    let dx = p.baseX - p.x;
+    let dy = p.baseY - p.y;
+
+    p.vx += dx * 0.01;
+    p.vy += dy * 0.01;
+
+    // hand repulsion
+    if (handPos) {
+      let hx = p.x - handPos.x;
+      let hy = p.y - handPos.y;
+      let dist = Math.sqrt(hx*hx + hy*hy);
+
+      if (dist < 120) {
+        let force = (120 - dist) / 120;
+        p.vx += (hx / dist) * force * 2;
+        p.vy += (hy / dist) * force * 2;
+      }
+    }
+
+    // damping
+    p.vx *= 0.92;
+    p.vy *= 0.92;
+
+    p.x += p.vx;
+    p.y += p.vy;
+  });
+}
+
+// Draw particles
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.5, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255, 255, 0, 0.9)";
+    ctx.fill();
+  });
+}
+
+// FACE
+const faceMesh = new FaceMesh({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+});
+
+faceMesh.setOptions({
+  maxNumFaces: 1,
+  refineLandmarks: true,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+
+faceMesh.onResults(results => {
+  if (results.multiFaceLandmarks) {
+    createParticles(results.multiFaceLandmarks[0]);
+  }
+});
+
+// HAND
+const hands = new Hands({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+
+hands.onResults(results => {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const p = results.multiHandLandmarks[0][8]; // index finger tip
+    handPos = {
+      x: (1 - p.x) * canvas.width,
+      y: p.y * canvas.height
+    };
+  } else {
+    handPos = null;
+  }
+});
+
+// Camera loop
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await faceMesh.send({image: video});
+    await hands.send({image: video});
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    updateParticles();
+    drawParticles();
+  },
+  width: 1280,
+  height: 720
+});
+
+camera.start();
+</script>
+
+</body>
+</html>

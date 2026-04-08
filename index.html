@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Face Particle Working</title>
+  <title>Purple Particle Face</title>
   <style>
     body { margin: 0; overflow: hidden; background: black; }
 
@@ -11,7 +11,7 @@
       height: 100vh;
       object-fit: cover;
       transform: scaleX(-1);
-      opacity: 1; /* FULL visible */
+      opacity: 1;
     }
 
     canvas {
@@ -28,6 +28,7 @@
 <canvas id="canvas"></canvas>
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
 
 <script>
@@ -38,11 +39,77 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-// Face mesh
+let particles = [];
+let pinchStrength = 0;
+
+// Convert
+function getPoint(p) {
+  return {
+    x: p.x * canvas.width,
+    y: p.y * canvas.height
+  };
+}
+
+// Create dense particles
+function createParticles(face) {
+  particles = [];
+
+  face.forEach(p => {
+    const pt = getPoint(p);
+
+    // add multiple particles per point (density boost)
+    for (let i = 0; i < 3; i++) {
+      particles.push({
+        x: pt.x,
+        y: pt.y,
+        baseX: pt.x,
+        baseY: pt.y,
+        vx: 0,
+        vy: 0
+      });
+    }
+  });
+}
+
+// Update physics
+function updateParticles() {
+  particles.forEach(p => {
+
+    // return to face
+    let dx = p.baseX - p.x;
+    let dy = p.baseY - p.y;
+
+    p.vx += dx * 0.02;
+    p.vy += dy * 0.02;
+
+    // diffusion force (when un-pinched)
+    if (pinchStrength < 0.5) {
+      p.vx += (Math.random() - 0.5) * 1.5;
+      p.vy += (Math.random() - 0.5) * 1.5;
+    }
+
+    // damping
+    p.vx *= 0.9;
+    p.vy *= 0.9;
+
+    p.x += p.vx;
+    p.y += p.vy;
+  });
+}
+
+// Draw
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.2, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(150, 0, 255, 0.9)";
+    ctx.fill();
+  });
+}
+
+// FACE
 const faceMesh = new FaceMesh({
-  locateFile: (file) => {
-    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
-  }
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
 });
 
 faceMesh.setOptions({
@@ -52,29 +119,53 @@ faceMesh.setOptions({
   minTrackingConfidence: 0.5
 });
 
-// Draw points
 faceMesh.onResults(results => {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
   if (!results.multiFaceLandmarks) return;
-
-  const face = results.multiFaceLandmarks[0];
-
-  face.forEach(p => {
-    const x = p.x * canvas.width;
-    const y = p.y * canvas.height;
-
-    ctx.beginPath();
-    ctx.arc(x, y, 1.5, 0, Math.PI*2);
-    ctx.fillStyle = "yellow";
-    ctx.fill();
-  });
+  createParticles(results.multiFaceLandmarks[0]);
 });
 
-// Camera
+// HAND
+const hands = new Hands({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
+});
+
+hands.onResults(results => {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+
+    const hand = results.multiHandLandmarks[0];
+
+    const thumb = hand[4];
+    const index = hand[8];
+
+    const dx = thumb.x - index.x;
+    const dy = thumb.y - index.y;
+
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    pinchStrength = dist; // smaller = pinch
+  } else {
+    pinchStrength = 0;
+  }
+});
+
+// LOOP
 const camera = new Camera(video, {
   onFrame: async () => {
     await faceMesh.send({image: video});
+    await hands.send({image: video});
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (particles.length > 0) {
+      updateParticles();
+      drawParticles();
+    }
   },
   width: 1280,
   height: 720

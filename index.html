@@ -1,18 +1,24 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Particle Face Interaction</title>
+  <title>Face Particle Interaction</title>
   <style>
     body { margin: 0; overflow: hidden; background: black; }
+
     video {
       position: absolute;
       width: 100vw;
       height: 100vh;
       object-fit: cover;
       transform: scaleX(-1);
-      opacity: 0.1;
+      opacity: 0.4; /* make face visible */
     }
-    canvas { position: absolute; top: 0; left: 0; }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
   </style>
 </head>
 
@@ -36,19 +42,19 @@ canvas.height = window.innerHeight;
 let particles = [];
 let handPos = null;
 
-// Convert points
-function getFacePoint(p) {
+// Convert face point
+function getPoint(p) {
   return {
     x: p.x * canvas.width,
     y: p.y * canvas.height
   };
 }
 
-// Create particles
-function createParticles(face) {
+// Create particles ONCE
+function updateBasePositions(face) {
   if (particles.length === 0) {
     particles = face.map(p => {
-      const pt = getFacePoint(p);
+      const pt = getPoint(p);
       return {
         x: pt.x,
         y: pt.y,
@@ -58,19 +64,25 @@ function createParticles(face) {
         vy: 0
       };
     });
+  } else {
+    face.forEach((p, i) => {
+      const pt = getPoint(p);
+      particles[i].baseX = pt.x;
+      particles[i].baseY = pt.y;
+    });
   }
 }
 
-// Update particles
+// Physics
 function updateParticles() {
   particles.forEach(p => {
 
-    // return to face (spring)
+    // spring back to face
     let dx = p.baseX - p.x;
     let dy = p.baseY - p.y;
 
-    p.vx += dx * 0.01;
-    p.vy += dy * 0.01;
+    p.vx += dx * 0.02;
+    p.vy += dy * 0.02;
 
     // hand repulsion
     if (handPos) {
@@ -78,33 +90,33 @@ function updateParticles() {
       let hy = p.y - handPos.y;
       let dist = Math.sqrt(hx*hx + hy*hy);
 
-      if (dist < 120) {
-        let force = (120 - dist) / 120;
-        p.vx += (hx / dist) * force * 2;
-        p.vy += (hy / dist) * force * 2;
+      if (dist < 150) {
+        let force = (150 - dist) / 150;
+        p.vx += (hx / dist) * force * 3;
+        p.vy += (hy / dist) * force * 3;
       }
     }
 
     // damping
-    p.vx *= 0.92;
-    p.vy *= 0.92;
+    p.vx *= 0.9;
+    p.vy *= 0.9;
 
     p.x += p.vx;
     p.y += p.vy;
   });
 }
 
-// Draw particles
+// Draw
 function drawParticles() {
   particles.forEach(p => {
     ctx.beginPath();
     ctx.arc(p.x, p.y, 1.5, 0, Math.PI*2);
-    ctx.fillStyle = "rgba(255, 255, 0, 0.9)";
+    ctx.fillStyle = "rgba(255,255,0,0.9)";
     ctx.fill();
   });
 }
 
-// FACE
+// Face
 const faceMesh = new FaceMesh({
   locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
 });
@@ -112,30 +124,30 @@ const faceMesh = new FaceMesh({
 faceMesh.setOptions({
   maxNumFaces: 1,
   refineLandmarks: true,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
 });
 
 faceMesh.onResults(results => {
   if (results.multiFaceLandmarks) {
-    createParticles(results.multiFaceLandmarks[0]);
+    updateBasePositions(results.multiFaceLandmarks[0]);
   }
 });
 
-// HAND
+// Hand
 const hands = new Hands({
   locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
 
 hands.setOptions({
   maxNumHands: 1,
-  minDetectionConfidence: 0.7,
-  minTrackingConfidence: 0.7
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
 });
 
 hands.onResults(results => {
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const p = results.multiHandLandmarks[0][8]; // index finger tip
+    const p = results.multiHandLandmarks[0][8];
     handPos = {
       x: (1 - p.x) * canvas.width,
       y: p.y * canvas.height
@@ -145,7 +157,7 @@ hands.onResults(results => {
   }
 });
 
-// Camera loop
+// Main loop
 const camera = new Camera(video, {
   onFrame: async () => {
     await faceMesh.send({image: video});
@@ -153,8 +165,10 @@ const camera = new Camera(video, {
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    updateParticles();
-    drawParticles();
+    if (particles.length > 0) {
+      updateParticles();
+      drawParticles();
+    }
   },
   width: 1280,
   height: 720
